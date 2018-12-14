@@ -1,6 +1,6 @@
 // Copyright 2018 Ian Johnson
 //
-// This file is part of vcard. Vcard is free software; you are free to use it
+// This file is part of vcard. Vcard is free software: you are free to use it
 // for any purpose, make modified versions and share it with others, subject
 // to the terms of the Apache license (version 2.0), a copy of which is
 // provided alongside this project.

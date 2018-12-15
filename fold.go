@@ -55,7 +55,6 @@ func (r *UnfoldingReader) ReadByte() (byte, error) {
 			return '\r', nil
 		}
 		if b2 == '\n' {
-			r.line++
 			b3, err := r.readByte()
 			if err != nil {
 				return '\n', nil
@@ -68,7 +67,6 @@ func (r *UnfoldingReader) ReadByte() (byte, error) {
 		}
 		r.unread = append(r.unread, b2)
 	} else if b == '\n' {
-		r.line++
 		b2, err := r.readByte()
 		if err != nil {
 			return '\n', nil
@@ -98,6 +96,9 @@ func (r *UnfoldingReader) readByte() (byte, error) {
 	n, err := r.r.Read(bs[:])
 	if n == 0 {
 		return 0, err
+	}
+	if bs[0] == '\n' {
+		r.line++
 	}
 	return bs[0], nil
 }

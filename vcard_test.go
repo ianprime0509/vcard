@@ -116,3 +116,30 @@ func TestParseAll(t *testing.T) {
 		}
 	}
 }
+
+func TestParseAllFailure(t *testing.T) {
+	// TODO: the line numbers are often off by one; fix this and add
+	// more tests.
+	tests := []struct {
+		in   string
+		line int
+		msg  string
+	}{
+		{"PROP:VALUE\r\nEND:VCARD", 1, "expected beginning of card"},
+		{"BEGIN:VCARD\r\n", 2, "unexpected end of input"},
+		{"BEGIN:VCARD\r\nEND:SOMETHING\r\n", 2, "malformed end tag"},
+		{" BAD\r\n", 1, "expected property name"},
+	}
+
+	for _, test := range tests {
+		cards, err := ParseAll(strings.NewReader(test.in))
+		if err == nil {
+			t.Errorf("successfully parsed %q", cards)
+			continue
+		}
+		perr := err.(ParseError)
+		if test.line != perr.Line || !strings.Contains(perr.Message(), test.msg) {
+			t.Errorf("ParseAll(%q) error %q, want %q on line %v", test.in, perr, test.msg, test.line)
+		}
+	}
+}

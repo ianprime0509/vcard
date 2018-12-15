@@ -169,6 +169,22 @@ func writeValue(w io.Writer, value string) {
 	}
 }
 
+// ParseError is the error type returned when an error occurs during parsing.
+type ParseError struct {
+	Line int // the line on which the error occurred
+	msg  string
+}
+
+func (p ParseError) Error() string {
+	return fmt.Sprintf("on line %v: %v", p.Line, p.msg)
+}
+
+// Message returns the error message returned by Error without any line
+// information.
+func (p ParseError) Message() string {
+	return p.msg
+}
+
 // ParseAll parses as many vCards from the given input as possible, until EOF
 // is reached or a parsing error occurs. If parsing fails at any point, the
 // returned slice will contain any cards that were successfully parsed
@@ -180,7 +196,7 @@ func ParseAll(r io.Reader) ([]*Card, error) {
 	for _, err := p.r.PeekByte(); err != io.EOF; _, err = p.r.PeekByte() {
 		card, err := p.parseCard()
 		if err != nil {
-			return cards, fmt.Errorf("on line %v: %v", p.r.Line(), err)
+			return cards, err
 		}
 		cards = append(cards, card)
 
@@ -197,32 +213,41 @@ type parser struct {
 // parseCard parses a complete vCard from the input.
 func (p *parser) parseCard() (*Card, error) {
 	card := &Card{m: make(map[string][]Property)}
+	// We store the line number here to get around incorrect error line
+	// numbers in some situations (when expecting the beginning of a card
+	// or finding a bad ending property).
+	line := p.r.Line()
 	name, prop, err := p.parseProperty()
 	if err != nil {
-		return &Card{}, err
+		return &Card{}, ParseError{p.r.Line(), err.Error()}
 	} else if name != "BEGIN" || len(prop.group) != 0 || len(prop.params) != 0 ||
 		len(prop.values) != 1 || strings.ToUpper(prop.values[0]) != "VCARD" {
-		return &Card{}, errors.New("expected beginning of card")
+		return &Card{}, ParseError{line, "expected beginning of card"}
 	}
 
-	for name, prop, err = p.parseProperty(); err == nil; name, prop, err = p.parseProperty() {
+	line = p.r.Line()
+	name, prop, err = p.parseProperty()
+	for err == nil {
 		if name == "END" {
 			if len(prop.group) != 0 || len(prop.params) != 0 ||
 				len(prop.values) != 1 || strings.ToUpper(prop.values[0]) != "VCARD" {
-				return &Card{}, errors.New("malformed end tag")
+				return &Card{}, ParseError{line, "malformed end tag"}
 			}
 			return card, nil
 		}
 		card.m[name] = append(card.m[name], prop)
+
+		line = p.r.Line()
+		name, prop, err = p.parseProperty()
 	}
 
 	if err == io.EOF {
-		return &Card{}, errors.New("unexpected end of input before ending card")
+		return &Card{}, ParseError{p.r.Line(), "unexpected end of input before ending card"}
 	}
-	return &Card{}, err
+	return &Card{}, ParseError{p.r.Line(), err.Error()}
 }
 
-// parseProperty parses a single property
+// parseProperty parses a single property.
 func (p *parser) parseProperty() (name string, prop Property, err error) {
 	// Parse name (or group).
 	nm, err := p.parseName("expected property name")
@@ -262,7 +287,6 @@ func (p *parser) parseProperty() (name string, prop Property, err error) {
 		return "", Property{}, err
 	}
 	if b != ':' {
-		fmt.Printf("%q\n", b)
 		return "", Property{}, errors.New("expected ':'")
 	}
 

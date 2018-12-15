@@ -9,6 +9,8 @@ package vcard
 
 import (
 	"io"
+	"strings"
+	"unicode/utf8"
 )
 
 // UnfoldingReader is a Reader that unfolds lines of text as they are
@@ -30,16 +32,15 @@ func NewUnfoldingReader(r io.Reader) *UnfoldingReader {
 }
 
 // Read implements io.Reader for UnfoldingReader.
-func (r *UnfoldingReader) Read(bs []byte) (int, error) {
-	var i int
-	for i = range bs {
+func (r *UnfoldingReader) Read(bs []byte) (n int, err error) {
+	for i := range bs {
 		b, err := r.ReadByte()
 		if err != nil {
 			return i, err
 		}
 		bs[i] = b
 	}
-	return i, nil
+	return len(bs), nil
 }
 
 // ReadByte reads a single byte from the reader.
@@ -112,4 +113,40 @@ func (r *UnfoldingReader) PeekByte() (byte, error) {
 // Line returns the number of the current line being read.
 func (r *UnfoldingReader) Line() int {
 	return r.line
+}
+
+// Fold folds a string, ensuring that no line exceeds the given number of bytes.
+// It also converts simple '\n' line endings to "\r\n". The vCard specification
+// recommends that output lines be folded to a width of at most 75 bytes,
+// excluding the line ending.
+//
+// This implementation respects UTF-8, so it will never break the line in the
+// middle of a codepoint.
+func Fold(s string, width int) string {
+	sb := new(strings.Builder)
+	line := new(strings.Builder)
+	// The maximum length of a line is width + 2 bytes, so we can
+	// pre-allocate this for efficiency.
+	line.Grow(width + 2)
+	var last rune
+
+	for _, r := range s {
+		if r == '\n' && last != '\r' {
+			// If \n is not preceded by \r, then we need to add the
+			// \r ourselves.
+			if line.Len() >= width {
+				sb.WriteString(line.String())
+				line.Reset()
+			}
+			line.WriteRune('\r')
+		}
+		if line.Len()+utf8.RuneLen(r) > width {
+			sb.WriteString(line.String())
+			line.Reset()
+		}
+		line.WriteRune(r)
+		last = r
+	}
+	sb.WriteString(line.String())
+	return sb.String()
 }

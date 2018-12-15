@@ -28,6 +28,92 @@ type Property struct {
 	Values []string
 }
 
+// String returns the card in vCard syntax, properly folded such that each line
+// fits within 77 bytes.
+func (c Card) String() string {
+	return Fold(c.UnfoldedString(), 77)
+}
+
+// UnfoldedString returns the card in vCard syntax, but without folding any
+// lines or using the "\r\n" line ending (it just uses the normal '\n').
+func (c Card) UnfoldedString() string {
+	sb := new(strings.Builder)
+	fmt.Fprintln(sb, "BEGIN:VCARD")
+	for name, props := range c {
+		for _, prop := range props {
+			if len(prop.Group) > 1 {
+				fmt.Fprintf(sb, "%v.", prop.Group)
+			}
+			sb.WriteString(name)
+			for key, values := range prop.Params {
+				sb.WriteRune(';')
+				writeParam(sb, key, values)
+			}
+			sb.WriteRune(':')
+			writeValues(sb, prop.Values)
+			sb.WriteRune('\n')
+		}
+	}
+	fmt.Fprintln(sb, "END:VCARD")
+	return sb.String()
+}
+
+// writeParam writes a parameter to the given Writer.
+func writeParam(w io.Writer, key string, values []string) {
+	fmt.Fprintf(w, "%v=", key)
+	for i, value := range values {
+		if i != 0 {
+			fmt.Fprint(w, ';')
+		}
+		if strings.ContainsAny(value, ";:") {
+			fmt.Fprintf(w, `"%v"`, value)
+		} else {
+			fmt.Fprint(w, value)
+		}
+	}
+}
+
+// writeValue writes a series of property values, separated by commas, to
+// the given Writer.
+func writeValues(w io.Writer, values []string) {
+	for i, value := range values {
+		if i != 0 {
+			fmt.Fprint(w, ",")
+		}
+		writeValue(w, value)
+	}
+}
+
+// writeValue writes a property value to the given Writer, taking care of
+// escaping special characters.
+func writeValue(w io.Writer, value string) {
+	last := rune(-1)
+	for _, r := range value {
+		if last != -1 {
+			// We shouldn't escape the backslash before a semicolon.
+			if last == '\\' && r != ';' {
+				fmt.Fprint(w, `\\`)
+			} else if last == ',' {
+				fmt.Fprint(w, `\,`)
+			} else if last == '\n' {
+				fmt.Fprint(w, `\n`)
+			} else {
+				fmt.Fprintf(w, "%c", last)
+			}
+		}
+		last = r
+	}
+	if last == '\\' {
+		fmt.Fprint(w, `\\`)
+	} else if last == ',' {
+		fmt.Fprint(w, `\,`)
+	} else if last == '\n' {
+		fmt.Fprint(w, `\n`)
+	} else {
+		fmt.Fprintf(w, "%c", last)
+	}
+}
+
 // Parse parses as many vCards from the given input as possible, until EOF is
 // reached or a parsing error occurs. If parsing fails at any point, the
 // returned slice will contain any cards that were successfully parsed
@@ -239,6 +325,7 @@ func (p *parser) parseParameter() (key string, values []string, err error) {
 	if err != nil {
 		return "", nil, err
 	}
+	key = strings.ToUpper(key)
 
 	msg := fmt.Sprintf("expected '=' after parameter name %v", key)
 	b, err := p.demandByte(msg)

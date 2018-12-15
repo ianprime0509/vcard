@@ -169,11 +169,11 @@ func writeValue(w io.Writer, value string) {
 	}
 }
 
-// Parse parses as many vCards from the given input as possible, until EOF is
-// reached or a parsing error occurs. If parsing fails at any point, the
+// ParseAll parses as many vCards from the given input as possible, until EOF
+// is reached or a parsing error occurs. If parsing fails at any point, the
 // returned slice will contain any cards that were successfully parsed
 // before the error.
-func Parse(r io.Reader) ([]*Card, error) {
+func ParseAll(r io.Reader) ([]*Card, error) {
 	var cards []*Card
 	p := parser{r: NewUnfoldingReader(bufio.NewReader(r))}
 

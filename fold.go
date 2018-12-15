@@ -45,16 +45,6 @@ func (r *UnfoldingReader) Read(bs []byte) (n int, err error) {
 
 // ReadByte reads a single byte from the reader.
 func (r *UnfoldingReader) ReadByte() (byte, error) {
-	if b := r.peeked; b != -1 {
-		r.peeked = -1
-		return byte(b), nil
-	}
-	if len(r.unread) > 0 {
-		b := r.unread[len(r.unread)-1]
-		r.unread = r.unread[:len(r.unread)-1]
-		return b, nil
-	}
-
 	b, err := r.readByte()
 	if err != nil {
 		return 0, err
@@ -73,6 +63,8 @@ func (r *UnfoldingReader) ReadByte() (byte, error) {
 			if b3 == ' ' || b3 == '\t' {
 				return r.ReadByte()
 			}
+			r.unread = append(r.unread, b3)
+			return '\n', nil
 		}
 		r.unread = append(r.unread, b2)
 	} else if b == '\n' {
@@ -92,6 +84,16 @@ func (r *UnfoldingReader) ReadByte() (byte, error) {
 // readByte reads a single byte from the underlying reader (for implementation
 // convenience).
 func (r *UnfoldingReader) readByte() (byte, error) {
+	if b := r.peeked; b != -1 {
+		r.peeked = -1
+		return byte(b), nil
+	}
+	if len(r.unread) > 0 {
+		b := r.unread[len(r.unread)-1]
+		r.unread = r.unread[:len(r.unread)-1]
+		return b, nil
+	}
+
 	var bs [1]byte
 	n, err := r.r.Read(bs[:])
 	if n == 0 {

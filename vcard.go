@@ -18,44 +18,99 @@ import (
 // Card is a container for vCard data, mapping each property name to a slice
 // containing the details of each occurrence of the property in the order they
 // appeared in the input.
-type Card map[string][]Property
+type Card struct {
+	m map[string][]Property
+}
 
-// Property is a container for the information stored in a vCard property,
-// except for the name.
-type Property struct {
-	Group  string
-	Params map[string][]string
-	Values []string
+// Get returns the properties corresponding to the given (case-insensitive)
+// property name.
+func (c *Card) Get(name string) []Property {
+	return c.m[strings.ToUpper(name)]
+}
+
+// Add adds a property to the card.
+func (c *Card) Add(name string, prop Property) {
+	if c.m == nil {
+		c.m = make(map[string][]Property)
+	}
+	name = strings.ToUpper(name)
+	c.m[name] = append(c.m[name], prop)
 }
 
 // String returns the card in vCard syntax, properly folded such that each line
 // fits within 77 bytes.
-func (c Card) String() string {
+func (c *Card) String() string {
 	return Fold(c.UnfoldedString(), 77)
 }
 
 // UnfoldedString returns the card in vCard syntax, but without folding any
 // lines or using the "\r\n" line ending (it just uses the normal '\n').
-func (c Card) UnfoldedString() string {
+func (c *Card) UnfoldedString() string {
 	sb := new(strings.Builder)
 	fmt.Fprintln(sb, "BEGIN:VCARD")
-	for name, props := range c {
+	for name, props := range c.m {
 		for _, prop := range props {
-			if len(prop.Group) > 1 {
-				fmt.Fprintf(sb, "%v.", prop.Group)
+			if len(prop.group) > 1 {
+				fmt.Fprintf(sb, "%v.", prop.group)
 			}
 			sb.WriteString(name)
-			for key, values := range prop.Params {
+			for key, values := range prop.params {
 				sb.WriteRune(';')
 				writeParam(sb, key, values)
 			}
 			sb.WriteRune(':')
-			writeValues(sb, prop.Values)
+			writeValues(sb, prop.values)
 			sb.WriteRune('\n')
 		}
 	}
 	fmt.Fprintln(sb, "END:VCARD")
 	return sb.String()
+}
+
+// Property is a container for the information stored in a vCard property,
+// except for the name.
+type Property struct {
+	group  string
+	params map[string][]string
+	values []string
+}
+
+// Group returns the group of the property.
+func (p *Property) Group() string {
+	return p.group
+}
+
+// SetGroup sets the group of the property.
+func (p *Property) SetGroup(group string) {
+	p.group = strings.ToUpper(group)
+}
+
+// Param returns the values of a property parameter. Changes to the returned
+// slice will be reflected in the property.
+func (p *Property) Param(param string) []string {
+	return p.params[strings.ToUpper(param)]
+}
+
+// SetParam sets the values of a property parameter. Further changes to the
+// given slice will be reflected in the property (this method does not make
+// a copy).
+func (p *Property) SetParam(param string, values ...string) {
+	if p.params == nil {
+		p.params = make(map[string][]string)
+	}
+	p.params[strings.ToUpper(param)] = values
+}
+
+// Values returns the values of a property. Changes to the returned slice will
+// be reflected in the property.
+func (p *Property) Values() []string {
+	return p.values
+}
+
+// SetValues sets the values of a property. Further changes to the given slice
+// will be reflected in the property (this method does not make a copy).
+func (p *Property) SetValues(values ...string) {
+	p.values = values
 }
 
 // writeParam writes a parameter to the given Writer.
@@ -118,8 +173,8 @@ func writeValue(w io.Writer, value string) {
 // reached or a parsing error occurs. If parsing fails at any point, the
 // returned slice will contain any cards that were successfully parsed
 // before the error.
-func Parse(r io.Reader) ([]Card, error) {
-	var cards []Card
+func Parse(r io.Reader) ([]*Card, error) {
+	var cards []*Card
 	p := parser{r: NewUnfoldingReader(bufio.NewReader(r))}
 
 	for _, err := p.r.PeekByte(); err != io.EOF; _, err = p.r.PeekByte() {
@@ -140,31 +195,31 @@ type parser struct {
 }
 
 // parseCard parses a complete vCard from the input.
-func (p *parser) parseCard() (Card, error) {
-	card := make(Card)
+func (p *parser) parseCard() (*Card, error) {
+	card := &Card{m: make(map[string][]Property)}
 	name, prop, err := p.parseProperty()
 	if err != nil {
-		return Card{}, err
-	} else if name != "BEGIN" || len(prop.Group) != 0 || len(prop.Params) != 0 ||
-		len(prop.Values) != 1 || strings.ToUpper(prop.Values[0]) != "VCARD" {
-		return Card{}, errors.New("expected beginning of card")
+		return &Card{}, err
+	} else if name != "BEGIN" || len(prop.group) != 0 || len(prop.params) != 0 ||
+		len(prop.values) != 1 || strings.ToUpper(prop.values[0]) != "VCARD" {
+		return &Card{}, errors.New("expected beginning of card")
 	}
 
 	for name, prop, err = p.parseProperty(); err == nil; name, prop, err = p.parseProperty() {
 		if name == "END" {
-			if len(prop.Group) != 0 || len(prop.Params) != 0 ||
-				len(prop.Values) != 1 || strings.ToUpper(prop.Values[0]) != "VCARD" {
-				return Card{}, errors.New("malformed end tag")
+			if len(prop.group) != 0 || len(prop.params) != 0 ||
+				len(prop.values) != 1 || strings.ToUpper(prop.values[0]) != "VCARD" {
+				return &Card{}, errors.New("malformed end tag")
 			}
 			return card, nil
 		}
-		card[name] = append(card[name], prop)
+		card.m[name] = append(card.m[name], prop)
 	}
 
 	if err == io.EOF {
-		return Card{}, errors.New("unexpected end of input before ending card")
+		return &Card{}, errors.New("unexpected end of input before ending card")
 	}
-	return Card{}, err
+	return &Card{}, err
 }
 
 // parseProperty parses a single property
@@ -181,7 +236,7 @@ func (p *parser) parseProperty() (name string, prop Property, err error) {
 	}
 	// If we parsed the group, now parse the name.
 	if b == '.' {
-		prop.Group = nm
+		prop.group = nm
 		nm, err = p.parseName("expected property name")
 		if err != nil {
 			return "", Property{}, err
@@ -199,7 +254,7 @@ func (p *parser) parseProperty() (name string, prop Property, err error) {
 		if err != nil {
 			return "", Property{}, err
 		}
-		prop.Params = params
+		prop.params = params
 		b, err = p.demandByte("expected property value")
 	}
 
@@ -215,7 +270,7 @@ func (p *parser) parseProperty() (name string, prop Property, err error) {
 	if err != nil {
 		return "", Property{}, err
 	}
-	prop.Values = values
+	prop.values = values
 
 	b, err = p.r.ReadByte()
 	if err == io.EOF {

@@ -123,31 +123,55 @@ func (r *UnfoldingReader) Line() int {
 // excluding the line ending.
 //
 // This implementation respects UTF-8, so it will never break the line in the
-// middle of a codepoint.
+// middle of a codepoint. Also, note that if you have lines beginning with
+// spaces (such as "hello\n world"), folding such a string and then unfolding
+// it will not return the original string, since the space remains at the
+// beginning of the next line.
 func Fold(s string, width int) string {
 	sb := new(strings.Builder)
 	line := new(strings.Builder)
 	// The maximum length of a line is width + 2 bytes, so we can
 	// pre-allocate this for efficiency.
 	line.Grow(width + 2)
-	var last rune
+	lastCR := false // whether the last character was '\r'
 
 	for _, r := range s {
-		if r == '\n' && last != '\r' {
-			// If \n is not preceded by \r, then we need to add the
-			// \r ourselves.
-			if line.Len() >= width {
-				sb.WriteString(line.String())
+		if lastCR {
+			if r == '\n' {
+				sb.WriteString(line.String() + "\r\n")
 				line.Reset()
+				lastCR = false
+				continue
+			}
+			if line.Len()+1 > width-2 {
+				sb.WriteString(line.String() + "\r\n")
+				line.Reset()
+				line.WriteRune(' ')
 			}
 			line.WriteRune('\r')
+			lastCR = false
 		}
-		if line.Len()+utf8.RuneLen(r) > width {
-			sb.WriteString(line.String())
+		if r == '\r' {
+			lastCR = true
+		} else if r == '\n' {
+			sb.WriteString(line.String() + "\r\n")
 			line.Reset()
+		} else {
+			if line.Len()+utf8.RuneLen(r) > width-2 {
+				sb.WriteString(line.String() + "\r\n")
+				line.Reset()
+				line.WriteRune(' ')
+			}
+			line.WriteRune(r)
 		}
-		line.WriteRune(r)
-		last = r
+	}
+	if lastCR {
+		if line.Len()+1 > width-2 {
+			sb.WriteString(line.String() + "\r\n")
+			line.Reset()
+			line.WriteRune(' ')
+		}
+		line.WriteRune('\r')
 	}
 	sb.WriteString(line.String())
 	return sb.String()

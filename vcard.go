@@ -117,7 +117,7 @@ func writeParam(w io.Writer, key string, values []string) {
 	fmt.Fprintf(w, "%v=", key)
 	for i, value := range values {
 		if i != 0 {
-			fmt.Fprint(w, ';')
+			fmt.Fprint(w, ",")
 		}
 		if strings.ContainsAny(value, ";:") {
 			fmt.Fprintf(w, `"%v"`, value)
@@ -350,6 +350,8 @@ func (p *parser) parsePropertyValue() (string, error) {
 			}
 			if b2 == ',' || b2 == '\\' {
 				bs = append(bs, b2)
+			} else if b2 == 'n' {
+				bs = append(bs, '\n')
 			} else if b2 == ';' {
 				bs = append(bs, '\\', ';')
 			} else {

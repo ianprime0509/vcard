@@ -6,6 +6,30 @@ import (
 	"testing"
 )
 
+// A sample vCard from Wikipedia: https://en.wikipedia.org/wiki/VCard#vCard_3.0
+const sampleVCard = `BEGIN:VCARD
+VERSION:3.0
+N:Gump;Forrest;;Mr.;
+FN:Forrest Gump
+ORG:Bubba Gump Shrimp Co.
+TITLE:Shrimp Man
+PHOTO;VALUE=URI;TYPE=GIF:http://www.example.com/dir_photos/my_photo.gif
+TEL;TYPE=WORK,VOICE:(111) 555-1212
+TEL;TYPE=HOME,VOICE:(404) 555-1212
+ADR;TYPE=WORK,PREF:;;100 Waters Edge;Baytown;LA;30314;United States of America
+LABEL;TYPE=WORK,PREF:100 Waters Edge\nBaytown\, LA 30314\nUnited States of America
+ADR;TYPE=HOME:;;42 Plantation St.;Baytown;LA;30314;United States of America
+LABEL;TYPE=HOME:42 Plantation St.\nBaytown\, LA 30314\nUnited States of America
+EMAIL:forrestgump@example.com
+REV:2008-04-24T19:52:43Z
+END:VCARD`
+
+func BenchmarkParseAll(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		ParseAll(strings.NewReader(sampleVCard))
+	}
+}
+
 func TestParseAll(t *testing.T) {
 	tests := []struct {
 		in     string
@@ -100,6 +124,22 @@ func TestParseAll(t *testing.T) {
 			&Card{map[string][]Property{
 				"PROP": {{
 					values: []string{"value1,value2\\", "\\", "\\;;\\;"},
+				}},
+			}},
+		},
+		{
+			"BEGIN:VCARD\r\nPROP:\r\nEND:VCARD\r\n",
+			&Card{map[string][]Property{
+				"PROP": {{
+					values: []string{""},
+				}},
+			}},
+		},
+		{
+			"BEGIN:VCARD\r\nPROP:multiple\\nlines\r\nEND:VCARD\r\n",
+			&Card{map[string][]Property{
+				"PROP": {{
+					values: []string{"multiple\nlines"},
 				}},
 			}},
 		},

@@ -103,6 +103,24 @@ func TestParseAll(t *testing.T) {
 				}},
 			}},
 		},
+		{
+			"BEGIN:VCARD\r\nGROUP.PROP:value\r\nEND:VCARD\r\n",
+			&Card{map[string][]Property{
+				"PROP": {{
+					group:  "GROUP",
+					values: []string{"value"},
+				}},
+			}},
+		},
+		{
+			"BEGIN:VCARD\r\nGroup.Prop:value\r\nEND:VCARD\r\n",
+			&Card{map[string][]Property{
+				"PROP": {{
+					group:  "GROUP",
+					values: []string{"value"},
+				}},
+			}},
+		},
 	}
 
 	for _, test := range tests {
@@ -118,8 +136,6 @@ func TestParseAll(t *testing.T) {
 }
 
 func TestParseAllFailure(t *testing.T) {
-	// TODO: the line numbers are often off by one; fix this and add
-	// more tests.
 	tests := []struct {
 		in   string
 		line int
@@ -129,6 +145,12 @@ func TestParseAllFailure(t *testing.T) {
 		{"BEGIN:VCARD\r\n", 2, "unexpected end of input"},
 		{"BEGIN:VCARD\r\nEND:SOMETHING\r\n", 2, "malformed end tag"},
 		{" BAD\r\n", 1, "expected property name"},
+		{"BEGIN:VCARD\r\nPROP\r\nEND:VCARD\r\n", 2, "expected ':'"},
+		{"BEGIN:VCARD\r\nPROP=2\r\nEND:VCARD\r\n", 2, "expected ':'"},
+		{"BEGIN:VCARD\r\nPROP;:2\r\nEND:VCARD\r\n", 2, "expected parameter name"},
+		{"BEGIN:VCARD\r\nPROP;PARAM:2\r\nEND:VCARD\r\n", 2, "expected '=' after parameter name"},
+		{"BEGIN:VCARD\r\nPROP;PARAM=\"test\n\":2\r\nEND:VCARD\r\n", 2, "unexpected byte '\\n' in quoted parameter value"},
+		{"BEGIN:VCARD\r\nPROP:escape\\:\r\nEND:VCARD\r\n", 2, "':' cannot be escaped"},
 	}
 
 	for _, test := range tests {
@@ -137,7 +159,10 @@ func TestParseAllFailure(t *testing.T) {
 			t.Errorf("successfully parsed %q", cards)
 			continue
 		}
-		perr := err.(ParseError)
+		perr, ok := err.(ParseError)
+		if !ok {
+			t.Errorf("ParseAll(%q) error %q, not a parse error", test.in, err)
+		}
 		if test.line != perr.Line || !strings.Contains(perr.Message(), test.msg) {
 			t.Errorf("ParseAll(%q) error %q, want %q on line %v", test.in, perr, test.msg, test.line)
 		}

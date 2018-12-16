@@ -9,7 +9,6 @@ package vcard
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -213,13 +212,11 @@ type parser struct {
 // parseCard parses a complete vCard from the input.
 func (p *parser) parseCard() (*Card, error) {
 	card := &Card{m: make(map[string][]Property)}
-	// We store the line number here to get around incorrect error line
-	// numbers in some situations (when expecting the beginning of a card
-	// or finding a bad ending property).
+
 	line := p.r.Line()
 	name, prop, err := p.parseProperty()
 	if err != nil {
-		return &Card{}, ParseError{p.r.Line(), err.Error()}
+		return &Card{}, err
 	} else if name != "BEGIN" || len(prop.group) != 0 || len(prop.params) != 0 ||
 		len(prop.values) != 1 || strings.ToUpper(prop.values[0]) != "VCARD" {
 		return &Card{}, ParseError{line, "expected beginning of card"}
@@ -244,7 +241,7 @@ func (p *parser) parseCard() (*Card, error) {
 	if err == io.EOF {
 		return &Card{}, ParseError{p.r.Line(), "unexpected end of input before ending card"}
 	}
-	return &Card{}, ParseError{p.r.Line(), err.Error()}
+	return &Card{}, err
 }
 
 // parseProperty parses a single property.
@@ -255,7 +252,8 @@ func (p *parser) parseProperty() (name string, prop Property, err error) {
 		return "", Property{}, err
 	}
 
-	b, err := p.demandByte("expected parameters or property value")
+	line := p.r.Line()
+	b, err := p.demandByte("expected ';' or ':'")
 	if err != nil {
 		return "", Property{}, err
 	}
@@ -266,7 +264,8 @@ func (p *parser) parseProperty() (name string, prop Property, err error) {
 		if err != nil {
 			return "", Property{}, err
 		}
-		b, err = p.demandByte("expected parameters or property value")
+		line = p.r.Line()
+		b, err = p.demandByte("expected ';' or ':'")
 	}
 	name = nm
 
@@ -280,14 +279,15 @@ func (p *parser) parseProperty() (name string, prop Property, err error) {
 			return "", Property{}, err
 		}
 		prop.params = params
-		b, err = p.demandByte("expected property value")
+		line = p.r.Line()
+		b, err = p.demandByte("expected ':'")
 	}
 
 	if err != nil {
 		return "", Property{}, err
 	}
 	if b != ':' {
-		return "", Property{}, errors.New("expected ':'")
+		return "", Property{}, ParseError{line, "expected ':'"}
 	}
 
 	values, err := p.parsePropertyValues()
@@ -296,6 +296,7 @@ func (p *parser) parseProperty() (name string, prop Property, err error) {
 	}
 	prop.values = values
 
+	line = p.r.Line()
 	b, err = p.r.ReadByte()
 	if err == io.EOF {
 		return name, prop, nil
@@ -303,7 +304,7 @@ func (p *parser) parseProperty() (name string, prop Property, err error) {
 		return "", Property{}, err
 	}
 	if b != '\n' {
-		return "", Property{}, fmt.Errorf("unexpected character %q after property value", b)
+		return "", Property{}, ParseError{line, fmt.Sprintf("unexpected character %q after property value", b)}
 	}
 	return name, prop, nil
 }
@@ -312,9 +313,8 @@ func (p *parser) parseProperty() (name string, prop Property, err error) {
 func (p *parser) parsePropertyValues() ([]string, error) {
 	var values []string
 
-	var value string
-	var err error
-	for value, err = p.parsePropertyValue(); err == nil; value, err = p.parsePropertyValue() {
+	value, err := p.parsePropertyValue()
+	for err == nil {
 		values = append(values, value)
 		b, err := p.r.PeekByte()
 		if err == io.EOF {
@@ -325,6 +325,7 @@ func (p *parser) parsePropertyValues() ([]string, error) {
 			return values, nil
 		}
 		p.r.ReadByte()
+		value, err = p.parsePropertyValue()
 	}
 	return nil, err
 }
@@ -335,14 +336,14 @@ func (p *parser) parsePropertyValues() ([]string, error) {
 func (p *parser) parsePropertyValue() (string, error) {
 	var bs []byte
 
-	var b byte
-	var err error
-	for b, err = p.r.PeekByte(); err == nil; b, err = p.r.PeekByte() {
+	b, err := p.r.PeekByte()
+	for err == nil {
 		if !isValueChar(b) {
 			return string(bs), nil
 		}
 		p.r.ReadByte()
 		if b == '\\' {
+			line := p.r.Line()
 			b2, err := p.demandByte("expected escaped character")
 			if err != nil {
 				return "", err
@@ -352,11 +353,12 @@ func (p *parser) parsePropertyValue() (string, error) {
 			} else if b2 == ';' {
 				bs = append(bs, '\\', ';')
 			} else {
-				return "", fmt.Errorf("%q cannot be escaped", b2)
+				return "", ParseError{line, fmt.Sprintf("%q cannot be escaped", b2)}
 			}
 		} else {
 			bs = append(bs, b)
 		}
+		b, err = p.r.PeekByte()
 	}
 	if err == io.EOF {
 		return string(bs), nil
@@ -375,12 +377,11 @@ func isValueChar(b byte) bool {
 func (p *parser) parseParameters() (map[string][]string, error) {
 	params := make(map[string][]string)
 
-	var key string
-	var values []string
-	var err error
-	for key, values, err = p.parseParameter(); err == nil; key, values, err = p.parseParameter() {
+	line := p.r.Line()
+	key, values, err := p.parseParameter()
+	for err == nil {
 		if _, ok := params[key]; ok {
-			return nil, fmt.Errorf("duplicate parameter %q", key)
+			return nil, ParseError{line, fmt.Sprintf("duplicate parameter %q", key)}
 		}
 		params[key] = values
 
@@ -393,6 +394,8 @@ func (p *parser) parseParameters() (map[string][]string, error) {
 			return params, nil
 		}
 		p.r.ReadByte()
+		line = p.r.Line()
+		key, values, err = p.parseParameter()
 	}
 	return nil, err
 }
@@ -407,15 +410,16 @@ func (p *parser) parseParameter() (key string, values []string, err error) {
 	key = strings.ToUpper(key)
 
 	msg := fmt.Sprintf("expected '=' after parameter name %v", key)
+	line := p.r.Line()
 	b, err := p.demandByte(msg)
 	if err != nil {
 		return "", nil, err
 	} else if b != '=' {
-		return "", nil, errors.New(msg)
+		return "", nil, ParseError{line, msg}
 	}
 
-	var value string
-	for value, err = p.parseParameterValue(); err == nil; value, err = p.parseParameterValue() {
+	value, err := p.parseParameterValue()
+	for err == nil {
 		values = append(values, value)
 		b, err := p.r.PeekByte()
 		if err == io.EOF {
@@ -426,6 +430,7 @@ func (p *parser) parseParameter() (key string, values []string, err error) {
 			return key, values, nil
 		}
 		p.r.ReadByte()
+		value, err = p.parseParameterValue()
 	}
 	return "", nil, err
 }
@@ -453,21 +458,23 @@ func (p *parser) parseParameterValue() (string, error) {
 func (p *parser) parseQuotedParameterValue() (string, error) {
 	var bs []byte
 
-	var b byte
-	var err error
-	for b, err = p.r.ReadByte(); err == nil; b, err = p.r.ReadByte() {
+	line := p.r.Line()
+	b, err := p.r.ReadByte()
+	for err == nil {
 		if b == '"' {
 			return string(bs), nil
 		} else if !isQuoteSafeChar(b) {
-			return "", fmt.Errorf("unexpected byte %q in quoted parameter value", b)
+			return "", ParseError{line, fmt.Sprintf("unexpected byte %q in quoted parameter value", b)}
 		}
 		bs = append(bs, b)
+		line = p.r.Line()
+		b, err = p.r.ReadByte()
 	}
 
 	if err != nil && err != io.EOF {
 		return "", err
 	}
-	return "", errors.New("unexpected end of quoted parameter value")
+	return "", ParseError{line, "unexpected end of quoted parameter value"}
 }
 
 // isQuoteSafeChar returns whether the given byte may appear within a quoted
@@ -481,14 +488,14 @@ func isQuoteSafeChar(b byte) bool {
 func (p *parser) parseUnquotedParameterValue() (string, error) {
 	var bs []byte
 
-	var b byte
-	var err error
-	for b, err = p.r.PeekByte(); err == nil; b, err = p.r.PeekByte() {
+	b, err := p.r.PeekByte()
+	for err == nil {
 		if !isSafeChar(b) {
 			return string(bs), nil
 		}
 		p.r.ReadByte()
 		bs = append(bs, b)
+		b, err = p.r.PeekByte()
 	}
 
 	if err != nil {
@@ -501,7 +508,7 @@ func (p *parser) parseUnquotedParameterValue() (string, error) {
 // parameter value.
 func isSafeChar(b byte) bool {
 	// Note: the official RFC for some reason includes ',' as a safe
-	// character; this is probably an oversight.
+	// character; not including it makes the parsing logic a bit easier.
 	return b == ' ' || b == '\t' || b == '!' || ('"' < b && b != ';' && b != ':' && b != ',')
 }
 
@@ -511,9 +518,9 @@ func isSafeChar(b byte) bool {
 func (p *parser) parseName(missing string) (string, error) {
 	var bs []byte
 
-	var b byte
-	var err error
-	for b, err = p.r.PeekByte(); err == nil; b, err = p.r.PeekByte() {
+	line := p.r.Line()
+	b, err := p.r.PeekByte()
+	for err == nil {
 		if ('A' <= b && b <= 'Z') || ('0' <= b && b <= '9') || b == '-' {
 			bs = append(bs, b)
 		} else if 'a' <= b && b <= 'z' {
@@ -523,22 +530,25 @@ func (p *parser) parseName(missing string) (string, error) {
 			break
 		}
 		p.r.ReadByte()
+		line = p.r.Line()
+		b, err = p.r.PeekByte()
 	}
 
 	if err != nil {
 		return string(bs), err
 	} else if len(bs) == 0 {
-		return "", errors.New(missing)
+		return "", ParseError{line, missing}
 	}
 	return string(bs), nil
 }
 
 // demandByte reads the next byte according to readByte, but converts an EOF
-// error into an error wrapping the given string.
-func (p *parser) demandByte(missing string) (byte, error) {
-	b, err := p.r.ReadByte()
+// error into a ParseError wrapping the given string.
+func (p *parser) demandByte(missing string) (b byte, err error) {
+	line := p.r.Line()
+	b, err = p.r.ReadByte()
 	if err == io.EOF {
-		return 0, errors.New(missing)
+		return 0, ParseError{line, err.Error()}
 	}
-	return b, err
+	return
 }

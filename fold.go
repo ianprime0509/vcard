@@ -16,10 +16,11 @@ import (
 // UnfoldingReader is a Reader that unfolds lines of text as they are
 // encountered and converts the "\r\n" line ending sequence to a single '\n'.
 type UnfoldingReader struct {
-	r      io.Reader
-	line   int
-	unread []byte // a stack of bytes that are queued up to be read
-	peeked int    // if not -1, the byte that was peeked at
+	r          io.Reader
+	line       int
+	unread     []byte // a stack of bytes that are queued up to be read
+	peeked     int    // if not -1, the byte that was peeked at
+	peekedLine int    // the line number of the peeked byte
 }
 
 // NewUnfoldingReader returns a new UnfoldingReader wrapping the given Reader.
@@ -84,6 +85,7 @@ func (r *UnfoldingReader) ReadByte() (byte, error) {
 func (r *UnfoldingReader) readByte() (byte, error) {
 	if b := r.peeked; b != -1 {
 		r.peeked = -1
+		r.line = r.peekedLine
 		return byte(b), nil
 	}
 	if len(r.unread) > 0 {
@@ -105,11 +107,14 @@ func (r *UnfoldingReader) readByte() (byte, error) {
 
 // PeekByte reads the next byte but keeps it for a future call to ReadByte.
 func (r *UnfoldingReader) PeekByte() (byte, error) {
+	line := r.line
 	b, err := r.ReadByte()
 	if err != nil {
 		return 0, err
 	}
 	r.peeked = int(b)
+	r.peekedLine = r.line
+	r.line = line
 	return b, nil
 }
 

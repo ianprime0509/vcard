@@ -188,29 +188,41 @@ func (p ParseError) Message() string {
 // is reached or a parsing error occurs. If parsing fails at any point, the
 // returned slice will contain any cards that were successfully parsed
 // before the error.
+//
+// This function is equivalent to wrapping the reader in a bufio.Reader (for
+// efficiency), creating a Parser and repeatedly calling the Next method until
+// it fails. Thus, it is sensitive to minor details like empty lines in a file
+// (which will cause a parsing error); for more control over such details, use
+// a Parser directly.
 func ParseAll(r io.Reader) ([]*Card, error) {
 	var cards []*Card
-	p := parser{r: NewUnfoldingReader(bufio.NewReader(r))}
+	p := NewParser(bufio.NewReader(r))
 
-	for _, err := p.r.PeekByte(); err != io.EOF; _, err = p.r.PeekByte() {
-		card, err := p.parseCard()
+	for card, err := p.Next(); err != io.EOF; card, err = p.Next() {
 		if err != nil {
 			return cards, err
 		}
 		cards = append(cards, card)
-
 	}
 
 	return cards, nil
 }
 
-// parser contains the state of the parse operation performed by Parse.
-type parser struct {
+// Parser is a parser for vCard data that reads a series of cards from an
+// underlying reader.
+type Parser struct {
 	r *UnfoldingReader
 }
 
-// parseCard parses a complete vCard from the input.
-func (p *parser) parseCard() (*Card, error) {
+// NewParser returns a new parser that takes data from a reader. The parser
+// takes care of unfolding the input data, so there is no need to wrap a
+// reader with an UnfoldingReader before passing it to this function.
+func NewParser(r io.Reader) *Parser {
+	return &Parser{r: NewUnfoldingReader(r)}
+}
+
+// Next parses and returns the next available card.
+func (p *Parser) Next() (*Card, error) {
 	card := &Card{m: make(map[string][]Property)}
 
 	line := p.r.Line()
@@ -245,7 +257,7 @@ func (p *parser) parseCard() (*Card, error) {
 }
 
 // parseProperty parses a single property.
-func (p *parser) parseProperty() (name string, prop Property, err error) {
+func (p *Parser) parseProperty() (name string, prop Property, err error) {
 	// Parse name (or group).
 	nm, err := p.parseName("expected property name")
 	if err != nil {
@@ -310,7 +322,7 @@ func (p *parser) parseProperty() (name string, prop Property, err error) {
 }
 
 // parsePropertyValues parses several property values, separated by commas.
-func (p *parser) parsePropertyValues() ([]string, error) {
+func (p *Parser) parsePropertyValues() ([]string, error) {
 	var values []string
 
 	value, err := p.parsePropertyValue()
@@ -333,7 +345,7 @@ func (p *parser) parsePropertyValues() ([]string, error) {
 // parsePropertyValue parses a single property value. Since a property value
 // may be empty, the returned error may be nil even if the returned string
 // is empty.
-func (p *parser) parsePropertyValue() (string, error) {
+func (p *Parser) parsePropertyValue() (string, error) {
 	var bs []byte
 
 	b, err := p.r.PeekByte()
@@ -376,7 +388,7 @@ func isValueChar(b byte) bool {
 
 // parseParameters parses a set of property parameters. Since parameters are
 // optional, both the map and error returned from this method may be nil.
-func (p *parser) parseParameters() (map[string][]string, error) {
+func (p *Parser) parseParameters() (map[string][]string, error) {
 	params := make(map[string][]string)
 
 	line := p.r.Line()
@@ -404,7 +416,7 @@ func (p *parser) parseParameters() (map[string][]string, error) {
 
 // parseParameter parses a single property parameter. If the returned error
 // is nil, then the key and values will both be non-nil.
-func (p *parser) parseParameter() (key string, values []string, err error) {
+func (p *Parser) parseParameter() (key string, values []string, err error) {
 	key, err = p.parseName("expected parameter name")
 	if err != nil {
 		return "", nil, err
@@ -440,7 +452,7 @@ func (p *parser) parseParameter() (key string, values []string, err error) {
 // parseParameterValue parses a single property parameter value. The returned
 // string may be empty even if the error is non-nil, since parameter values
 // may be empty.
-func (p *parser) parseParameterValue() (string, error) {
+func (p *Parser) parseParameterValue() (string, error) {
 	b, err := p.r.PeekByte()
 	if err == io.EOF {
 		return "", nil
@@ -457,7 +469,7 @@ func (p *parser) parseParameterValue() (string, error) {
 
 // parseQuotedParameterValue parses the inner part of a paramter enclosed in
 // double quotes. It will also consume the closing quote.
-func (p *parser) parseQuotedParameterValue() (string, error) {
+func (p *Parser) parseQuotedParameterValue() (string, error) {
 	var bs []byte
 
 	line := p.r.Line()
@@ -487,7 +499,7 @@ func isQuoteSafeChar(b byte) bool {
 
 // parseUnquotedParameterValue parses a parameter value not enclosed in double
 // quotes.
-func (p *parser) parseUnquotedParameterValue() (string, error) {
+func (p *Parser) parseUnquotedParameterValue() (string, error) {
 	var bs []byte
 
 	b, err := p.r.PeekByte()
@@ -517,7 +529,7 @@ func isSafeChar(b byte) bool {
 // parseName parses anything that has the format of a property name, group
 // or parameter name. If the parsed name is empty but no other error occurred,
 // an error will be returned wrapping the given string.
-func (p *parser) parseName(missing string) (string, error) {
+func (p *Parser) parseName(missing string) (string, error) {
 	var bs []byte
 
 	line := p.r.Line()
@@ -546,7 +558,7 @@ func (p *parser) parseName(missing string) (string, error) {
 
 // demandByte reads the next byte according to readByte, but converts an EOF
 // error into a ParseError wrapping the given string.
-func (p *parser) demandByte(missing string) (b byte, err error) {
+func (p *Parser) demandByte(missing string) (b byte, err error) {
 	line := p.r.Line()
 	b, err = p.r.ReadByte()
 	if err == io.EOF {

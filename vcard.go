@@ -37,17 +37,37 @@ func (c *Card) Add(name string, prop Property) {
 }
 
 // String returns the card in vCard syntax, properly folded such that each line
-// fits within 77 bytes.
+// fits within 77 bytes. As with UnfoldedString, the order of properties in
+// the result is undefined, except for VERSION, which will always come first if
+// it is present.
 func (c *Card) String() string {
 	return Fold(c.UnfoldedString(), 77)
 }
 
 // UnfoldedString returns the card in vCard syntax, but without folding any
-// lines or using the "\r\n" line ending (it just uses the normal '\n').
+// lines or using the "\r\n" line ending (it just uses the normal '\n'). The
+// order of the properties in the returned string is undefined, except that
+// the VERSION property (if present) will always be first.
 func (c *Card) UnfoldedString() string {
 	sb := new(strings.Builder)
 	fmt.Fprintln(sb, "BEGIN:VCARD")
+	// If the VERSION property is present, we need to print that first.
+	version, ok := c.m["VERSION"]
+	// This implementation doesn't behave well if the version property
+	// appears more than once, and it ignores any group or parameters, but
+	// since no standard vCard will do any of that it seems fine to ignore
+	// these cases.
+	if ok && len(version) > 0 {
+		sb.WriteString("VERSION:")
+		writeValues(sb, version[0].values)
+		sb.WriteRune('\n')
+	}
 	for name, props := range c.m {
+		// We already wrote the VERSION property above.
+		if name == "VERSION" {
+			continue
+		}
+
 		for _, prop := range props {
 			if len(prop.group) > 1 {
 				fmt.Fprintf(sb, "%v.", prop.group)

@@ -87,9 +87,50 @@ var sampleVCardParsed = &Card{map[string][]Property{
 	}},
 }}
 
+func BenchmarkUnfoldedString(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		sampleVCardParsed.UnfoldedString()
+	}
+}
+
 func BenchmarkParseAll(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ParseAll(strings.NewReader(sampleVCard))
+	}
+}
+
+func TestUnfoldedString(t *testing.T) {
+	// We need to trim the final newline (if any) so it doesn't show up as
+	// a property in the list of lines.
+	expectedLines := strings.Split(strings.TrimRight(sampleVCard, "\r\n"), "\n")
+	unfolded := sampleVCardParsed.UnfoldedString()
+	actualLines := strings.Split(strings.TrimRight(unfolded, "\r\n"), "\n")
+
+	if len(actualLines) != len(expectedLines) {
+		t.Fatalf("got %v lines, want %v", len(actualLines), len(expectedLines))
+	}
+
+	// The BEGIN, VERSION and END properties should be the same.
+	if actualLines[0] != expectedLines[0] {
+		t.Fatalf("got begin %q, want %q", actualLines[0], expectedLines[0])
+	}
+	if actualLines[1] != expectedLines[1] {
+		t.Fatalf("got version %q, want %q", actualLines[1], expectedLines[1])
+	}
+	if actualLines[len(actualLines)-1] != expectedLines[len(expectedLines)-1] {
+		t.Fatalf("got end %q, want %q", actualLines[len(actualLines)-1], expectedLines[len(expectedLines)-1])
+	}
+
+	// For the rest, the order doesn't matter. We checked equal lengths
+	// above, so this is sufficient to check full equality.
+	for _, line := range expectedLines {
+		for _, actualLine := range actualLines {
+			if line == actualLine {
+				goto found
+			}
+		}
+		t.Fatalf("wanted line %q but not found", line)
+	found:
 	}
 }
 

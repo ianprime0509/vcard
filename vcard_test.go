@@ -215,6 +215,17 @@ var successTests = []struct {
 		}},
 	},
 	{
+		"BEGIN:VCARD\r\nX-PROP;PARAM=test;PARAM=test2,\"hello,there\":value\r\nEND:VCARD\r\n",
+		&Card{map[string][]Property{
+			"X-PROP": {{
+				params: map[string][]string{
+					"PARAM": {"test", "test2", "hello,there"},
+				},
+				values: []string{"value"},
+			}},
+		}},
+	},
+	{
 		"BEGIN:VCARD\r\nPROP:value1,value2\r\nEND:VCARD\r\n",
 		&Card{map[string][]Property{
 			"PROP": {{
@@ -223,10 +234,10 @@ var successTests = []struct {
 		}},
 	},
 	{
-		"BEGIN:VCARD\r\nPROP:value1\\,value2\\\\,\\\\,\\;;\\;\r\nEND:VCARD\r\n",
+		"BEGIN:VCARD\r\nPROP:value1\\,\\:value2\\\\,\\\\,\\;;\\;\r\nEND:VCARD\r\n",
 		&Card{map[string][]Property{
 			"PROP": {{
-				values: []string{"value1,value2\\", "\\", "\\;;\\;"},
+				values: []string{"value1,:value2\\", "\\", "\\;;\\;"},
 			}},
 		}},
 	},
@@ -312,14 +323,14 @@ var failureTests = []struct {
 	{"BEGIN:VCARD\r\nPROP;:2\r\nEND:VCARD\r\n", 2, "expected parameter name"},
 	{"BEGIN:VCARD\r\nPROP;PARAM:2\r\nEND:VCARD\r\n", 2, "expected '=' after parameter name"},
 	{"BEGIN:VCARD\r\nPROP;PARAM=\"test\n\":2\r\nEND:VCARD\r\n", 2, "unexpected byte '\\n' in quoted parameter value"},
-	{"BEGIN:VCARD\r\nPROP:escape\\:\r\nEND:VCARD\r\n", 2, "':' cannot be escaped"},
+	{"BEGIN:VCARD\r\nPROP:escape\\&\r\nEND:VCARD\r\n", 2, "'&' cannot be escaped"},
 }
 
 func TestParseAllFailure(t *testing.T) {
 	for _, test := range failureTests {
 		cards, err := ParseAll(strings.NewReader(test.in))
 		if err == nil {
-			t.Errorf("successfully parsed %q", cards)
+			t.Errorf("successfully parsed %q as %q", test.in, cards)
 			continue
 		}
 		perr, ok := err.(ParseError)

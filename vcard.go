@@ -380,7 +380,7 @@ func (p *Parser) parsePropertyValue() (string, error) {
 			if err != nil {
 				return "", err
 			}
-			if b2 == ',' || b2 == '\\' {
+			if b2 == ',' || b2 == '\\' || b2 == ':' {
 				bs = append(bs, b2)
 			} else if b2 == 'n' {
 				bs = append(bs, '\n')
@@ -411,13 +411,9 @@ func isValueChar(b byte) bool {
 func (p *Parser) parseParameters() (map[string][]string, error) {
 	params := make(map[string][]string)
 
-	line := p.r.Line()
 	key, values, err := p.parseParameter()
 	for err == nil {
-		if _, ok := params[key]; ok {
-			return nil, ParseError{line, fmt.Sprintf("duplicate parameter %q", key)}
-		}
-		params[key] = values
+		params[key] = append(params[key], values...)
 
 		b, err := p.r.PeekByte()
 		if err == io.EOF {
@@ -428,7 +424,6 @@ func (p *Parser) parseParameters() (map[string][]string, error) {
 			return params, nil
 		}
 		p.r.ReadByte()
-		line = p.r.Line()
 		key, values, err = p.parseParameter()
 	}
 	return nil, err

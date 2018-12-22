@@ -22,7 +22,8 @@ type Card struct {
 }
 
 // Get returns the properties corresponding to the given (case-insensitive)
-// property name.
+// property name. If the name does not correspond to a property, the result is
+// nil.
 func (c *Card) Get(name string) []Property {
 	return c.m[strings.ToUpper(name)]
 }
